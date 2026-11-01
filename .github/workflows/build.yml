@@ -1,0 +1,173 @@
+name: Build iStoreOS H339PC RK3399
+on:
+  workflow_dispatch:  # 手动触发（重点！网页点Run workflow）
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 拉取仓库源码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc libxml2-utils python3 python3-pip unzip wget bison flex rsync
+          sudo pip3 install pycryptodome
+
+      - name: 缓存OpenWrt编译目录（提速）
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt
+            dl
+            build_dir
+            staging_dir
+          key: ${{ runner.os }}-istoreos-h339pc-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-istoreos-h339pc-
+
+      - name: 写入H339PC设备树
+        run: |
+          cat > patch/dts/rk3399-h339pc.dts <<'EOF'
+// SPDX-License-Identifier: GPL-2.0
+// RK3399 H339PC RTL8211E
+#include "rk3399.dtsi"
+#include "rk3399-pmic.dtsi"
+
+/ {
+	model = "H339PC RK3399 RTL8211E";
+	compatible = "h339pc,rk3399", "rockchip,rk3399";
+
+	aliases {
+		ethernet0 = &gmac;
+	};
+};
+
+&gmac {
+	phy-mode = "rgmii";
+	phy-supply = <&vcc3v3_s3>;
+	phy-handle = <&rtl8211e>;
+	tx_delay = <0x28>;
+	rx_delay = <0x11>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii_pins>;
+	status = "okay";
+
+	mdio {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		rtl8211e: ethernet-phy@1 {
+			reg = <1>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+			interrupt-parent = <&gpio4>;
+			interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
+			reset-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&sdhci {
+	max-frequency = <150000000>;
+	status = "okay";
+};
+
+&emmc {
+	max-frequency = <200000000>;
+	status = "okay";
+};
+
+&usb3 {
+	status = "okay";
+};
+
+&usb2 {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&vcc3v3_s3 {
+	regulator-always-on;
+};
+EOF
+
+      - name: 写入H339PC配置（Docker+全插件）
+        run: |
+          cat > config/h339pc-docker-full.config <<'EOF'
+CONFIG_TARGET_rockchip=y
+CONFIG_TARGET_rockchip_rk3399=y
+CONFIG_TARGET_rockchip_rk3399_DEVICE_h339pc=y
+
+CONFIG_KERNEL_CGROUP=y
+CONFIG_KERNEL_CGROUP_FREEZER=y
+CONFIG_KERNEL_CGROUP_PIDS=y
+CONFIG_KERNEL_CGROUP_DEVICE=y
+CONFIG_KERNEL_CGROUP_CPUACCT=y
+CONFIG_KERNEL_CGROUP_SCHED=y
+CONFIG_KERNEL_OVERLAY_FS=y
+CONFIG_KERNEL_NET_CLS_CGROUP=y
+CONFIG_KERNEL_MEMCG=y
+
+CONFIG_PACKAGE_dockerd=y
+CONFIG_PACKAGE_docker=y
+CONFIG_PACKAGE_luci-app-dockerman=y
+CONFIG_PACKAGE_docker-compose=y
+
+CONFIG_PACKAGE_luci-app-istore=y
+CONFIG_PACKAGE_luci-app-adguardhome=y
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_luci-app-qbittorrent=y
+CONFIG_PACKAGE_luci-app-samba4=y
+CONFIG_PACKAGE_luci-app-frpc=y
+CONFIG_PACKAGE_luci-app-zerotier=y
+CONFIG_PACKAGE_luci-app-nfs=y
+CONFIG_PACKAGE_luci-app-ddns=y
+CONFIG_PACKAGE_luci-app-vlmcsd=y
+CONFIG_PACKAGE_luci-app-netdata=y
+CONFIG_PACKAGE_luci-app-wol=y
+CONFIG_PACKAGE_luci-app-ttyd=y
+CONFIG_PACKAGE_luci-app-filebrowser=y
+CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-app-socat=y
+CONFIG_PACKAGE_luci-app-pushbot=y
+
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-usb-ohci=y
+CONFIG_PACKAGE_kmod-usb-uhci=y
+CONFIG_PACKAGE_kmod-fs-ext4=y
+CONFIG_PACKAGE_kmod-fs-f2fs=y
+CONFIG_PACKAGE_kmod-fs-ntfs3=y
+CONFIG_PACKAGE_kmod-net-rtl8211=y
+EOF
+
+      - name: 修改env.sh为H339PC
+        run: |
+          cat > env.sh <<'EOF'
+TARGET_BOARD="rk3399"
+TARGET_PROFILE="h339pc"
+CONFIG_FILE="./config/h339pc-docker-full.config"
+DTS_FILE="./patch/dts/rk3399-h339pc.dts"
+EOF
+
+      - name: 开始编译
+        run: |
+          ./scripts/prepare.sh
+          ./scripts/load_config.sh
+          make -j$(nproc)
+          ./scripts/pack_img.sh
+
+      - name: 上传固件产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: istoreos-h339pc-rk3399
+          path: out/*.img*
+          retention-days: 7
