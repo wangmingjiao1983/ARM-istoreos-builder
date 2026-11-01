@@ -35,51 +35,7 @@ jobs:
         run: |
           cat > patch/dts/rk3399-h339pc.dts <<'EOF'
 // SPDX-License-Identifier: GPL-2.0
-// RK3399 H339PC RTL8211E
-#include "rk3399.dtsi"
-#include "rk3399-pmic.dtsi"
 
-/ {
-	model = "H339PC RK3399 RTL8211E";
-	compatible = "h339pc,rk3399", "rockchip,rk3399";
-
-	aliases {
-		ethernet0 = &gmac;
-	};
-};
-
-&gmac {
-	phy-mode = "rgmii";
-	phy-supply = <&vcc3v3_s3>;
-	phy-handle = <&rtl8211e>;
-	tx_delay = <0x28>;
-	rx_delay = <0x11>;
-	pinctrl-names = "default";
-	pinctrl-0 = <&rgmii_pins>;
-	status = "okay";
-
-	mdio {
-		compatible = "snps,dwmac-mdio";
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		rtl8211e: ethernet-phy@1 {
-			reg = <1>;
-			compatible = "ethernet-phy-ieee802.3-c22";
-			interrupt-parent = <&gpio4>;
-			interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
-			reset-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_LOW>;
-		};
-	};
-};
-
-&sdhci {
-	max-frequency = <150000000>;
-	status = "okay";
-};
-
-&emmc {
-	max-frequency = <200000000>;
 	status = "okay";
 };
 
